@@ -18,7 +18,7 @@ def build_graph(df):
         movie_title = row['Name']
         director = row['Director']
         genres = row['Genre'].split(',')
-        stars = row['Stars'].split(',')
+        stars = row['Stars'].split(',')[0:3]
 
         # add movie nodes and rating
         G.add_node(movie_title, type='movie',
@@ -91,7 +91,7 @@ def visualize_subgraph(G, center_node, depth=1):
 
 
 if __name__ == "__main__":
-    df = load_data('./IMDB_Top_250_Movies.csv')
+    df = load_data('./IMDB.csv')
 
     G = build_graph(df)
 
