@@ -1,6 +1,7 @@
 import pandas as pd
 import networkx as nx
-import matplotlib.pyplot as plt
+from visualization import visualize_subgraph
+from collections import defaultdict
 
 
 # 1. load data
@@ -11,9 +12,20 @@ def load_data(csv_path):
 
 # 2. build graph
 def build_graph(df):
+    '''
+    Build a directed weighted graph based on the Dataset.
+    The graph contains nodes for movies, directors, stars, and genres.
+    Edges are created based on the relationships between these entities.
+    
+    Parameters:
+    - df: the dataframe containing the movie data
+    
+    Returns:
+    - G: a directed graph with nodes and edges
+    '''
     G = nx.DiGraph()
 
-    # iterate through each row in the DataFrame
+    # iterate through each row in the csv file
     for idx, row in df.iterrows():
         movie_title = row['Name']
         director = row['Director']
@@ -50,51 +62,140 @@ def build_graph(df):
     return G
 
 
-def visualize_subgraph(G, center_node, depth=1):
-    """可视化以特定节点为中心的子图"""
-    # 提取子图
-    nodes = {center_node}
-    current_nodes = {center_node}
+# 3. use BFS to find related movies based on a starting node
+def find_related_movies(G, start_node, depth=2, pref_type=None):
+    ''''
+    BFS to find related movie paths. Used after the graph is generated.
 
-    for _ in range(depth):
-        next_nodes = set()
-        for node in current_nodes:
-            neighbors = set(G.successors(node)) | set(G.predecessors(node))
-            next_nodes.update(neighbors)
-        nodes.update(next_nodes)
-        current_nodes = next_nodes
+    Parameters:
+    - G: the graph
+    - start_node: the starting node
+    - depth: the depth of BFS
 
-    subgraph = G.subgraph(nodes)
+    Returns:
+    - visited: a set of visited nodes
+    '''
+    visited = set()  # to keep track of visited nodes
 
-    # 可视化
-    pos = nx.spring_layout(subgraph)
+    # queue for BFS, each element is a tuple (node, current_depth, weight, path)
+    queue = [(start_node, 0, 1.0, [start_node])]
+    related_movies = []  # to keep track of movies found
 
-    # 按节点类型分组绘制
-    movie_nodes = [n for n, d in subgraph.nodes(data=True) if d.get('type') == 'movie']
-    director_nodes = [n for n, d in subgraph.nodes(data=True) if d.get('type') == 'director']
-    star_nodes = [n for n, d in subgraph.nodes(data=True) if d.get('type') == 'star']
-    genre_nodes = [n for n, d in subgraph.nodes(data=True) if d.get('type') == 'genre']
+    while queue:
+        current_node, current_depth, weight, path = queue.pop(0)
 
-    plt.figure(figsize=(12, 10))
-    nx.draw_networkx_nodes(subgraph, pos, nodelist=movie_nodes, node_color='blue', node_size=500, alpha=0.8, label='Movies')
-    nx.draw_networkx_nodes(subgraph, pos, nodelist=director_nodes, node_color='red', node_size=400, alpha=0.8, label='Directors')
-    nx.draw_networkx_nodes(subgraph, pos, nodelist=star_nodes, node_color='green', node_size=300, alpha=0.8, label='Stars')
-    nx.draw_networkx_nodes(subgraph, pos, nodelist=genre_nodes, node_color='yellow', node_size=300, alpha=0.8, label='Genres')
+        # check if the current node is visited
+        if current_node in visited:
+            continue
+        else:
+            visited.add(current_node)
 
-    nx.draw_networkx_edges(subgraph, pos, alpha=0.5, arrows=True)
-    nx.draw_networkx_labels(subgraph, pos, font_size=8)
+        # if the current node is a movie and not visited, add it to movies
+        if G.nodes[current_node]['type'] == 'movie' and current_node != start_node:
+            related_movies.append((current_node, current_depth, weight, pref_type, path))
 
-    plt.legend()
-    plt.title(f"Movie Graph Centered on '{center_node}'")
-    plt.axis('off')
-    plt.show()
+        # if the current depth is less than the specified depth, continue BFS
+        if current_depth < depth:
+            neighbors = list(G.successors(current_node))
+            for neighbor in neighbors:
+                if neighbor not in visited:
+                    # calculate the new weight based on the edge weight
+                    new_weight = weight * G[current_node][neighbor]['weight']
+                    queue.append((neighbor, current_depth + 1, new_weight, path + [neighbor]))
+
+    return related_movies
 
 
-if __name__ == "__main__":
-    df = load_data('./IMDB.csv')
+# 4. Find all related movies based on the user input
+def find_all_related_movies(G, preferences):
+    '''
+    Find all related movies based on the user input.
+
+    Parameters:
+    - G: the graph
+    - preferences: a dictionary of user preferences
+        {'movie': ['movie_name'], 'director': ['director_name']}
+
+    Returns:
+    - related_movies: a list of related movies
+    '''
+    all_related_movies = []
+    for pref_type, pref_values in preferences.items():
+        for preference in pref_values:
+            # find related movies for each preference
+            if preference not in G.nodes:
+                print(f"Node '{preference}' not found in the graph.")
+                continue
+            movies = find_related_movies(G, preference, depth=2, pref_type=pref_type)
+            if movies:
+                all_related_movies.extend(movies)
+            else:
+                print(f"No related movies found for '{preference}'.")
+
+    return all_related_movies
+
+
+# 5. calculate movie scores based on user preferences
+def calculate_movie_scores(G, movie_name, all_related_movies):
+    '''
+    Calculate movie scores based on user preferences.
+    The score is calculated based on the path taken to reach the movie.
+    
+    final score = base_score + path_scores
+    where path_scores = sum(path_weight * pref_weight * length_penalty * 20)
+    '''
+    base_score = G.nodes[movie_name].get('rating') * 10  # base score from the movie node
+    
+    movie_paths = [p for p in all_related_movies if p[0] == movie_name]  # filter paths for the movie
+    
+    # filter the paths based on the user preferences
+    # {'genre':[], 'director':[]}
+    paths_dict = defaultdict(list)
+    for path in movie_paths:
+        paths_dict[path[3]].append(path)
+    
+    # calculate the score for the movie by summing the weights of the paths
+    path_scores = 0
+    for pref_type, paths in paths_dict.items():
+        # find the path with the highest weight in each preference type
+        strongest_path = max(paths, key=lambda x: x[2])
+        path_length, path_weight = strongest_path[1], strongest_path[2]
+        
+        # calculate the preference weight based on the preference type
+        pref_weight = 1.0
+        if pref_type == 'director':
+            pref_weight = 1.5
+        elif pref_type == 'star':
+            pref_weight = 1.2
+        elif pref_type == 'genre':
+            pref_weight = 0.8
+        else:
+            pref_weight = 1.0
+        
+        # length penalty
+        length_penalty = 1 - (path_length / 10)
+        
+        # calculate the score for the path
+        path_score = path_weight * pref_weight * length_penalty * 20
+        path_scores += path_score
+    
+    final_score = base_score + path_scores
+    return final_score
+
+
+def recommendation(csv_path, preferences):
+    df = load_data(csv_path)
 
     G = build_graph(df)
 
     print(f"Graph has {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
 
-    visualize_subgraph(G, 'Christopher Nolan', depth=2)
+    # visualize_subgraph(G, 'Anne Hathaway', depth=2)
+
+    all_related_movies = find_all_related_movies(G, preferences)
+    print(f"Scores: {calculate_movie_scores(G, 'Inception', all_related_movies)}")
+
+
+if __name__ == "__main__":
+    preferences = {'director': ['Christopher Nolan'], 'genre': ['Sci-Fi']}
+    recommendation('./IMDB_Top_250_Movies.csv', preferences)
