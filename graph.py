@@ -31,6 +31,7 @@ def build_graph(df):
         director = row['Director']
         genres = row['Genre'].split(',')
         stars = row['Stars'].split(',')[0:3]
+        year = str(row['Release_Year']) 
 
         # add movie nodes and rating
         G.add_node(movie_title, type='movie',
@@ -58,6 +59,11 @@ def build_graph(df):
                 G.add_node(star, type='star')
             G.add_edge(star, movie_title, weight=0.8)  # star -> movie
             G.add_edge(movie_title, star, weight=0.4)  # movie -> star
+
+        if not G.has_node(year):
+            G.add_node(year, type='year')
+        G.add_edge(year, movie_title, weight=0.6)  # year -> movie
+        G.add_edge(movie_title, year, weight=0.2)  # movie -> year
 
     return G
 
@@ -171,19 +177,81 @@ def calculate_movie_scores(G, movie_name, all_related_movies):
             pref_weight = 0.8
         else:
             pref_weight = 1.0
-        
+
         # length penalty
         length_penalty = 1 - (path_length / 10)
-        
+   
         # calculate the score for the path
         path_score = path_weight * pref_weight * length_penalty * 20
         path_scores += path_score
-    
+  
     final_score = base_score + path_scores
     return final_score
 
 
-def recommendation(csv_path, preferences):
+# 6. Merge sort for scores
+def merge_sort_movies(movie_score_list):
+    if len(movie_score_list) <= 1:
+        return movie_score_list
+    mid = len(movie_score_list) // 2
+    left = merge_sort_movies(movie_score_list[:mid])
+    right = merge_sort_movies(movie_score_list[mid:])
+    return merge(left, right)
+
+
+def merge(left, right):
+    sorted_list = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        if left[i][1] >= right[j][1]:
+            sorted_list.append(left[i])
+            i += 1
+        else:
+            sorted_list.append(right[j])
+            j += 1
+    sorted_list.extend(left[i:])
+    sorted_list.extend(right[j:])
+    return sorted_list
+
+
+# 7. Top-N selection with diversity and novelty
+def select_top_n_with_diversity(G, sorted_movies, n=5, penalty=0.5, coverage_weight=0.3):
+    selected = []
+    seen = {"genres": set(), "stars": set(), "directors": set()}
+    # Iterate through the sorted movies and select top N with diversity
+    for movie, score in sorted_movies:
+        genre_overlap = sum(g in seen["genres"] for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre')
+        star_overlap = sum(s in seen["stars"] for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star')
+        director_overlap = sum(d in seen["directors"] for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director')
+
+        # Identify new coverage
+        new_genres = [g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre' and g not in seen['genres']]
+        new_stars = [s for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star' and s not in seen['stars']]
+        new_directors = [d for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director' and d not in seen['directors']]
+
+        novelty_boost = coverage_weight * (len(new_genres) + len(new_stars) + len(new_directors))
+        overlap_penalty = penalty * (genre_overlap + star_overlap + director_overlap)
+        adjusted_score = score - overlap_penalty + novelty_boost
+
+        print(f"\nEvaluating movie: {movie}")
+        print(f"  Base Score: {score:.2f}")
+        print(f"  Genre Overlap: {genre_overlap}, Star Overlap: {star_overlap}, Director Overlap: {director_overlap}")
+        print(f"  Diversity Penalty: {overlap_penalty:.2f}, Novelty Boost: {novelty_boost:.2f}, Adjusted Score: {adjusted_score:.2f}")
+
+        if adjusted_score >= 0:
+            selected.append((movie, adjusted_score))
+            seen["genres"].update(new_genres)
+            seen["stars"].update(new_stars)
+            seen["directors"].update(new_directors)
+
+        if len(selected) == n:
+            break
+
+    return selected
+
+
+# 8. Main function to run the recommendation system
+def recommendation(csv_path, preferences, top_n=5):
     df = load_data(csv_path)
 
     G = build_graph(df)
@@ -194,6 +262,22 @@ def recommendation(csv_path, preferences):
 
     all_related_movies = find_all_related_movies(G, preferences)
     print(f"Scores: {calculate_movie_scores(G, 'Inception', all_related_movies)}")
+
+    all_titles = set()
+    for m in all_related_movies:
+        all_titles.add(m[0])
+
+    scores = []
+    for title in all_titles:
+        score = calculate_movie_scores(G, title, all_related_movies)
+        scores.append((title, score))
+
+    sorted_movies = merge_sort_movies(scores)
+    diverse_recommendations = select_top_n_with_diversity(G, sorted_movies, n=top_n)
+
+    print(f"\nTop {top_n} Personalized Movie Recommendations:")
+    for i, (movie, score) in enumerate(diverse_recommendations):
+        print(f"{i+1}. {movie} (Score: {score:.2f})")
 
 
 if __name__ == "__main__":
