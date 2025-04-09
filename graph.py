@@ -1,6 +1,6 @@
 import pandas as pd
 import networkx as nx
-from visualization import visualize_subgraph
+from View import visualize_subgraph
 from collections import defaultdict
 
 
@@ -31,12 +31,15 @@ def build_graph(df):
         director = row['Director']
         genres = row['Genre'].split(',')
         stars = row['Stars'].split(',')[0:3]
-        year = str(row['Release_Year']) 
+        year = row['Release_Year']
+        
+        # Create decade string (e.g., "1990s")
+        decade = f"{(year // 10) * 10}s"
 
         # add movie nodes and rating
         G.add_node(movie_title, type='movie',
                    rating=row['Rating'],
-                   year=row['Release_Year'], duration=row['Duration'])
+                   year=year, duration=row['Duration'])
 
         # add director nodes and edges
         if G.has_node(director) is False:
@@ -60,10 +63,11 @@ def build_graph(df):
             G.add_edge(star, movie_title, weight=0.8)  # star -> movie
             G.add_edge(movie_title, star, weight=0.4)  # movie -> star
 
-        if not G.has_node(year):
-            G.add_node(year, type='year')
-        G.add_edge(year, movie_title, weight=0.6)  # year -> movie
-        G.add_edge(movie_title, year, weight=0.2)  # movie -> year
+        # add decade nodes and edges
+        if not G.has_node(decade):
+            G.add_node(decade, type='decade')
+        G.add_edge(decade, movie_title, weight=0.6)  # decade -> movie
+        G.add_edge(movie_title, decade, weight=0.2)  # movie -> decade
 
     return G
 
@@ -258,10 +262,10 @@ def recommendation(csv_path, preferences, top_n=5):
 
     print(f"Graph has {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
 
-    # visualize_subgraph(G, 'Anne Hathaway', depth=2)
+    # visualize_subgraph(G, 'Christopher Nolan', depth=2)
 
     all_related_movies = find_all_related_movies(G, preferences)
-    print(f"Scores: {calculate_movie_scores(G, 'Inception', all_related_movies)}")
+    # print(f"Scores: {calculate_movie_scores(G, 'Inception', all_related_movies)}")
 
     all_titles = set()
     for m in all_related_movies:
@@ -277,9 +281,14 @@ def recommendation(csv_path, preferences, top_n=5):
 
     print(f"\nTop {top_n} Personalized Movie Recommendations:")
     for i, (movie, score) in enumerate(diverse_recommendations):
-        print(f"{i+1}. {movie} (Score: {score:.2f})")
+        print(f"{i+1}. {movie} (Score: {score:.2f}) ")
+        print(f"    Director: {', '.join([d for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director'])}, "
+              f"Release Year: {G.nodes[movie]['year']}, ",
+              f"Genres: {', '.join([g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre'])}, ",
+              f"Rating: {G.nodes[movie]['rating']}, ",
+              f"Duration: {G.nodes[movie]['duration']} mins")
 
 
 if __name__ == "__main__":
-    preferences = {'director': ['Christopher Nolan'], 'genre': ['Sci-Fi']}
+    preferences = {'genre': ['Sci-Fi']}
     recommendation('./IMDB_Top_250_Movies.csv', preferences)
