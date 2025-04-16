@@ -2,6 +2,7 @@ import pandas as pd
 import networkx as nx
 from View import visualize_subgraph
 from collections import defaultdict
+from difflib import get_close_matches
 
 
 # 1. load data
@@ -70,6 +71,13 @@ def build_graph(df):
         G.add_edge(movie_title, decade, weight=0.2)  # movie -> decade
 
     return G
+
+
+# fuzzy-match user input to movie nodes
+def match_movie_node(G, query, cutoff=0.4):
+    movies = [n for n, d in G.nodes(data=True) if d.get('type') == 'movie']
+    matches = get_close_matches(query, movies, n=1, cutoff=cutoff)
+    return matches[0] if matches else None
 
 
 # 3. use BFS to find related movies based on a starting node
@@ -150,30 +158,32 @@ def calculate_movie_scores(G, movie_name, all_related_movies):
     '''
     Calculate movie scores based on user preferences.
     The score is calculated based on the path taken to reach the movie.
-    
+
     final score = base_score + path_scores
     where path_scores = sum(path_weight * pref_weight * length_penalty * 20)
     '''
     base_score = G.nodes[movie_name].get('rating') * 10  # base score from the movie node
-    
+   
     movie_paths = [p for p in all_related_movies if p[0] == movie_name]  # filter paths for the movie
-    
+
     # filter the paths based on the user preferences
     # {'genre':[], 'director':[]}
     paths_dict = defaultdict(list)
     for path in movie_paths:
         paths_dict[path[3]].append(path)
-    
+ 
     # calculate the score for the movie by summing the weights of the paths
     path_scores = 0
     for pref_type, paths in paths_dict.items():
         # find the path with the highest weight in each preference type
         strongest_path = max(paths, key=lambda x: x[2])
         path_length, path_weight = strongest_path[1], strongest_path[2]
-        
+
         # calculate the preference weight based on the preference type
-        pref_weight = 1.0
-        if pref_type == 'director':
+        # boost direct movie matches
+        if pref_type == 'movie':
+            pref_weight = 2.0
+        elif pref_type == 'director':
             pref_weight = 1.5
         elif pref_type == 'star':
             pref_weight = 1.2
@@ -184,11 +194,11 @@ def calculate_movie_scores(G, movie_name, all_related_movies):
 
         # length penalty
         length_penalty = 1 - (path_length / 10)
-   
+
         # calculate the score for the path
         path_score = path_weight * pref_weight * length_penalty * 20
         path_scores += path_score
-  
+
     final_score = base_score + path_scores
     return final_score
 
@@ -264,9 +274,21 @@ def recommendation(csv_path, preferences, top_n=5):
 
     # visualize_subgraph(G, 'Christopher Nolan', depth=2)
 
+    # fuzzy-match movie preferences
+    if 'movie' in preferences:
+        real_movies = []
+        for q in preferences['movie']:
+            match = match_movie_node(G, q)
+            if match:
+                real_movies.append(match)
+            else:
+                print(f"No close match for '{q}'")
+        preferences['movie'] = real_movies
+
     all_related_movies = find_all_related_movies(G, preferences)
     # print(f"Scores: {calculate_movie_scores(G, 'Inception', all_related_movies)}")
 
+    # score all titles
     all_titles = set()
     for m in all_related_movies:
         all_titles.add(m[0])
@@ -277,11 +299,25 @@ def recommendation(csv_path, preferences, top_n=5):
         scores.append((title, score))
 
     sorted_movies = merge_sort_movies(scores)
-    diverse_recommendations = select_top_n_with_diversity(G, sorted_movies, n=top_n)
+
+    # series boosting if user picked a single movie
+    final_recs = []
+    if 'movie' in preferences and preferences['movie']:
+        start = preferences['movie'][0]
+        series_prefix = start.split(':')[0].strip()
+        # other in same series
+        series = [(m, s) for m, s in sorted_movies if m != start and series_prefix in m]
+        series_sorted = merge_sort_movies(series)
+        # remaining
+        remaining = [(m, s) for m, s in sorted_movies if m != start and series_prefix not in m]
+        diverse_rest = select_top_n_with_diversity(G, remaining, n=top_n - len(series_sorted))
+        final_recs = series_sorted + diverse_rest
+    else:
+        final_recs = select_top_n_with_diversity(G, sorted_movies, n=top_n)
 
     print(f"\nTop {top_n} Personalized Movie Recommendations:")
-    for i, (movie, score) in enumerate(diverse_recommendations):
-        print(f"{i+1}. {movie} (Score: {score:.2f}) ")
+    for i, (movie, score) in enumerate(final_recs[:top_n], 1):
+        print(f"{i}. {movie} (Score: {score:.2f}) ")
         print(f"    Director: {', '.join([d for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director'])}, "
               f"Release Year: {G.nodes[movie]['year']}, ",
               f"Genres: {', '.join([g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre'])}, ",
@@ -290,5 +326,5 @@ def recommendation(csv_path, preferences, top_n=5):
 
 
 if __name__ == "__main__":
-    preferences = {'genre': ['Sci-Fi']}
+    preferences = {'movie': ['Star Wars: Episode V - The Empire Strikes Back']}
     recommendation('./IMDB_Top_250_Movies.csv', preferences)
