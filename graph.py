@@ -1,6 +1,6 @@
 import pandas as pd
 import networkx as nx
-from View import visualize_subgraph
+from View import create_recommendation_report
 from collections import defaultdict
 from difflib import get_close_matches
 
@@ -323,8 +323,12 @@ def recommendation(csv_path, preferences, top_n=5):
               f"Genres: {', '.join([g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre'])}, ",
               f"Rating: {G.nodes[movie]['rating']}, ",
               f"Duration: {G.nodes[movie]['duration']} mins")
+    create_recommendation_report(G, preferences, final_recs[:top_n], all_related_movies)
 
 
 if __name__ == "__main__":
-    preferences = {'movie': ['Star Wars: Episode V - The Empire Strikes Back']}
+    preferences = {'movie': ['Star Wars: Episode V - The Empire Strikes Back'],
+                   'director': ['Christopher Nolan'],
+                   'star': ['Leonardo DiCaprio'],
+                   'genre': ['Action', 'Drama', 'Crime']}
     recommendation('./IMDB_Top_250_Movies.csv', preferences)
