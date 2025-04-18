@@ -1,6 +1,6 @@
 # Movie Recommendation System
 
-A graph-based movie recommendation system that leverages complex relationships between movies, directors, actors, and genres to provide personalized and diverse movie recommendations.
+A graph-based movie recommendation system that leverages complex relationships between movies, directors, stars, and genres to provide personalized and diverse movie recommendations.
 
 ## Features
 
@@ -75,10 +75,6 @@ The system automatically generates visualizations to explain the recommendation 
 - `View.py`: Visualization functionality for recommendation paths
 - `IMDB_Top_250_Movies.csv`: Dataset containing movie information
 - `requirements.txt`: List of dependencies needed to run the project
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
