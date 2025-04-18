@@ -259,9 +259,21 @@ def select_top_n_with_diversity(G, sorted_movies, n=5, penalty=1.0, coverage_wei
             
         best_movie = max(candidates, key=lambda x: x[1])
         movie, adj_score, new_genres, new_stars, new_directors = best_movie
-        
+
+        # Find the original score for the movie
+        original_score = next(s for m, s in remaining if m == movie)
+
+        # Get the overlap values for this specific movie
+        genre_overlap = sum(g in seen["genres"] for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre')
+        star_overlap = sum(s in seen["stars"] for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star')
+        director_overlap = sum(d in seen["directors"] for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director')
+
+        # Calculate novelty boost and penalty again for printing purposes
+        novelty_boost = coverage_weight * (len(new_genres) + len(new_stars) + len(new_directors))
+        overlap_penalty = penalty * (genre_overlap + star_overlap + director_overlap)
+
         print(f"\nEvaluating movie: {movie}")
-        print(f"  Base Score: {score:.2f}")
+        print(f"  Base Score: {original_score:.2f}")
         print(f"  Genre Overlap: {genre_overlap}, Star Overlap: {star_overlap}, Director Overlap: {director_overlap}")
         print(f"  Diversity Penalty: {overlap_penalty:.2f}, Novelty Boost: {novelty_boost:.2f}, Adjusted Score: {adj_score:.2f}")
         
@@ -338,5 +350,7 @@ def recommendation(csv_path, preferences, top_n=5):
 
 
 if __name__ == "__main__":
-    preferences = {'genre': ['Action']}
+    preferences = {'director': ['Christopher Nolan', 'Quentin Tarantino'],
+    'genre': ['Drama', 'Thriller'],
+    'star': ['Leonardo DiCaprio']}
     recommendation('./IMDB_Top_250_Movies.csv', preferences)
