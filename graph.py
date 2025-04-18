@@ -81,7 +81,7 @@ def match_movie_node(G, query, cutoff=0.4):
 
 
 # 3. use BFS to find related movies based on a starting node
-def find_related_movies(G, start_node, depth=2, pref_type=None):
+def find_related_movies(G, start_node, depth=3, pref_type=None):
     ''''
     BFS to find related movie paths. Used after the graph is generated.
 
@@ -229,38 +229,51 @@ def merge(left, right):
 
 
 # 7. Top-N selection with diversity and novelty
-def select_top_n_with_diversity(G, sorted_movies, n=5, penalty=0.5, coverage_weight=0.3):
+def select_top_n_with_diversity(G, sorted_movies, n=5, penalty=1.0, coverage_weight=0.5):
     selected = []
     seen = {"genres": set(), "stars": set(), "directors": set()}
-    # Iterate through the sorted movies and select top N with diversity
-    for movie, score in sorted_movies:
-        genre_overlap = sum(g in seen["genres"] for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre')
-        star_overlap = sum(s in seen["stars"] for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star')
-        director_overlap = sum(d in seen["directors"] for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director')
+    remaining = sorted_movies.copy()
+    
+    while len(selected) < n and remaining:
+        # Evaluate all remaining movies with current diversity considerations
+        candidates = []
+        for movie, score in remaining:
+            genre_overlap = sum(g in seen["genres"] for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre')
+            star_overlap = sum(s in seen["stars"] for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star')
+            director_overlap = sum(d in seen["directors"] for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director')
 
-        # Identify new coverage
-        new_genres = [g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre' and g not in seen['genres']]
-        new_stars = [s for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star' and s not in seen['stars']]
-        new_directors = [d for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director' and d not in seen['directors']]
+            # Identify new coverage
+            new_genres = [g for g in G.predecessors(movie) if G.nodes[g]['type'] == 'genre' and g not in seen['genres']]
+            new_stars = [s for s in G.predecessors(movie) if G.nodes[s]['type'] == 'star' and s not in seen['stars']]
+            new_directors = [d for d in G.predecessors(movie) if G.nodes[d]['type'] == 'director' and d not in seen['directors']]
 
-        novelty_boost = coverage_weight * (len(new_genres) + len(new_stars) + len(new_directors))
-        overlap_penalty = penalty * (genre_overlap + star_overlap + director_overlap)
-        adjusted_score = score - overlap_penalty + novelty_boost
-
+            novelty_boost = coverage_weight * (len(new_genres) + len(new_stars) + len(new_directors))
+            overlap_penalty = penalty * (genre_overlap + star_overlap + director_overlap)
+            adjusted_score = score - overlap_penalty + novelty_boost
+            
+            candidates.append((movie, adjusted_score, new_genres, new_stars, new_directors))
+        
+        # Find the movie with the highest adjusted score
+        if not candidates:
+            break
+            
+        best_movie = max(candidates, key=lambda x: x[1])
+        movie, adj_score, new_genres, new_stars, new_directors = best_movie
+        
         print(f"\nEvaluating movie: {movie}")
         print(f"  Base Score: {score:.2f}")
         print(f"  Genre Overlap: {genre_overlap}, Star Overlap: {star_overlap}, Director Overlap: {director_overlap}")
-        print(f"  Diversity Penalty: {overlap_penalty:.2f}, Novelty Boost: {novelty_boost:.2f}, Adjusted Score: {adjusted_score:.2f}")
-
-        if adjusted_score >= 0:
-            selected.append((movie, adjusted_score))
-            seen["genres"].update(new_genres)
-            seen["stars"].update(new_stars)
-            seen["directors"].update(new_directors)
-
-        if len(selected) == n:
-            break
-
+        print(f"  Diversity Penalty: {overlap_penalty:.2f}, Novelty Boost: {novelty_boost:.2f}, Adjusted Score: {adj_score:.2f}")
+        
+        # Add to selected and update seen sets
+        selected.append((movie, adj_score))
+        seen["genres"].update(new_genres)
+        seen["stars"].update(new_stars)
+        seen["directors"].update(new_directors)
+        
+        # Remove the selected movie from remaining
+        remaining = [(m, s) for m, s in remaining if m != movie]
+    
     return selected
 
 
@@ -271,8 +284,6 @@ def recommendation(csv_path, preferences, top_n=5):
     G = build_graph(df)
 
     print(f"Graph has {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
-
-    # visualize_subgraph(G, 'Christopher Nolan', depth=2)
 
     # fuzzy-match movie preferences
     if 'movie' in preferences:
@@ -327,8 +338,5 @@ def recommendation(csv_path, preferences, top_n=5):
 
 
 if __name__ == "__main__":
-    preferences = {'movie': ['Star Wars: Episode V - The Empire Strikes Back'],
-                   'director': ['Christopher Nolan'],
-                   'star': ['Leonardo DiCaprio'],
-                   'genre': ['Action', 'Drama', 'Crime']}
+    preferences = {'genre': ['Action']}
     recommendation('./IMDB_Top_250_Movies.csv', preferences)
